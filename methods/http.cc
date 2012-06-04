@@ -53,6 +53,7 @@
 #include "connect.h"
 #include "rfc2553emu.h"
 #include "http.h"
+#include "http_header.h"
 
 #include <apti18n.h>
 									/*}}}*/
@@ -573,26 +574,15 @@ bool ServerState::HeaderLine(string Line)
       return true;
    }      
 
-   string::size_type Pos = Line.find(' ');
-   if (Pos == string::npos || Pos+1 > Line.length())
-   {
-      // Blah, some servers use "connection:closes", evil.
-      Pos = Line.find(':');
-      if (Pos == string::npos || Pos + 2 > Line.length())
-	 return _error->Error(_("Bad header line"));
-      Pos++;
-   }
+   HttpHeader Header = HttpHeader(Line);
+   if (Header.empty())
+      return _error->Error(_("Bad header line"));
 
-   // Parse off any trailing spaces between the : and the next word.
-   string::size_type Pos2 = Pos;
-   while (Pos2 < Line.length() && isspace(Line[Pos2]) != 0)
-      Pos2++;
-      
-   string Tag = string(Line,0,Pos);
-   string Val = string(Line,Pos2);
+   string Tag = Header.name();
+   string Val = Header.value();
    
       
-   if (stringcasecmp(Tag,"Content-Length:") == 0)
+   if (stringcasecmp(Tag,"Content-Length") == 0)
    {
       if (Encoding == Closes)
 	 Encoding = Stream;
@@ -608,13 +598,13 @@ bool ServerState::HeaderLine(string Line)
       return true;
    }
 
-   if (stringcasecmp(Tag,"Content-Type:") == 0)
+   if (stringcasecmp(Tag,"Content-Type") == 0)
    {
       HaveContent = true;
       return true;
    }
    
-   if (stringcasecmp(Tag,"Content-Range:") == 0)
+   if (stringcasecmp(Tag,"Content-Range") == 0)
    {
       HaveContent = true;
       
@@ -625,7 +615,7 @@ bool ServerState::HeaderLine(string Line)
       return true;
    }
    
-   if (stringcasecmp(Tag,"Transfer-Encoding:") == 0)
+   if (stringcasecmp(Tag,"Transfer-Encoding") == 0)
    {
       HaveContent = true;
       if (stringcasecmp(Val,"chunked") == 0)
@@ -633,7 +623,7 @@ bool ServerState::HeaderLine(string Line)
       return true;
    }
 
-   if (stringcasecmp(Tag,"Connection:") == 0)
+   if (stringcasecmp(Tag,"Connection") == 0)
    {
       if (stringcasecmp(Val,"close") == 0)
 	 Persistent = false;
@@ -642,14 +632,14 @@ bool ServerState::HeaderLine(string Line)
       return true;
    }
    
-   if (stringcasecmp(Tag,"Last-Modified:") == 0)
+   if (stringcasecmp(Tag,"Last-Modified") == 0)
    {
       if (RFC1123StrToTime(Val.c_str(), Date) == false)
 	 return _error->Error(_("Unknown date format"));
       return true;
    }
 
-   if (stringcasecmp(Tag,"Location:") == 0)
+   if (stringcasecmp(Tag,"Location") == 0)
    {
       Location = Val;
       return true;
