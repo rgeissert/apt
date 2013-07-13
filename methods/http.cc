@@ -645,6 +645,47 @@ bool ServerState::HeaderLine(string Line)
       return true;
    }
 
+   unsigned long long MaxRewriters = _config->FindI("Acquire::http::MaxRewriters", 4);
+   if (stringcasecmp(Tag,"Link") == 0 && MaxRewriters != 0)
+   {
+      // yay for this being the only header that APT cares about which
+      // may be present more than once:
+      vector<HttpHeader> LinkVec = Header.split();
+      unsigned long PreviousDepth = 0;
+      for (size_t i = 0; i < LinkVec.size(); i++) {
+	 HttpLink6249Header Link6249 = HttpLink6249Header(LinkVec[i]);
+
+	 // ignore errors and headers we don't care about
+	 if (Link6249.empty())
+	    continue;
+
+	 // for now we are only interested in those with depth > 0
+	 // and only add new rewriters if the depth is greater than the
+	 // previous rewriter
+	 if (Link6249.depth() == 0 || Link6249.depth() < PreviousDepth)
+	    continue;
+
+	 HttpLinkHeader Link(LinkVec[i]);
+	 URI LinkUri = URI(Link.getURI());
+	 // avoid same-host loops and protocol switches:
+	 if (LinkUri.Access != "http" || LinkUri.Host == ServerName.Host)
+	    continue;
+
+	 // Require a valid rewrite
+	 if (Link6249.depthPath().length() == 0)
+	    continue;
+
+	 if (RFC6249Rewriters.size() > MaxRewriters)
+	    RFC6249Rewriters.pop_front();
+
+	 Link6249.setOrigURI(ServerName);
+	 RFC6249Rewriters.push_back(Link6249);
+	 PreviousDepth = Link6249.depth();
+      }
+
+      return true;
+   }
+
    return true;
 }
 									/*}}}*/
@@ -655,6 +696,8 @@ bool ServerState::HeaderLine(string Line)
 void HttpMethod::SendReq(FetchItem *Itm,CircleBuf &Out)
 {
    URI Uri = Itm->Uri;
+
+   Server->ServerName = Uri;
 
    // The HTTP server expects a hostname with a trailing :port
    char Buf[1000];
@@ -1067,7 +1110,7 @@ bool HttpMethod::Fetch(FetchItem *)
    // Queue the requests
    int Depth = -1;
    for (FetchItem *I = Queue; I != 0 && Depth < (signed)PipelineDepth; 
-	I = I->Next, Depth++)
+	Depth++)
    {
       // If pipelining is disabled, we only queue 1 request
       if (Server->Pipeline == false && Depth >= 0)
@@ -1079,7 +1122,35 @@ bool HttpMethod::Fetch(FetchItem *)
       if (QueueBack == I)
       {
 	 QueueBack = I->Next;
+
+	 if (PipelineDepth == 0 && Server->RFC6249Rewriters.size()) {
+
+	    bool Rewritten = false;
+	    std::list<HttpLink6249Header>::iterator LIt;
+	    for (LIt = Server->RFC6249Rewriters.begin();
+		 LIt != Server->RFC6249Rewriters.end(); ++LIt)
+	    {
+	       URI NewURI = LIt->rewrite(I->Uri);
+
+	       if (NewURI.empty())
+		  continue;
+
+	       // Point to the next item before redirecting, as the
+	       // current item will be destroyed:
+	       I = I->Next;
+	       Redirect(NewURI);
+	       // Revert the effect of the increase in Depth at the end
+	       // of the for loop. The pipeline limit can be applied by
+	       // the method handling the final request:
+	       --Depth;
+	       Rewritten = true;
+	       break;
+	    }
+	    if (Rewritten)
+	       continue;
+	 }
 	 SendReq(I,Server->Out);
+	 I = I->Next;
 	 continue;
       }
    }
@@ -1176,6 +1247,9 @@ int HttpMethod::Loop()
 
       // Fill the pipeline.
       Fetch(0);
+
+      if (Queue == 0)
+	 continue;
       
       // Fetch the next URL header data from the server.
       switch (Server->RunHeaders())

@@ -26,6 +26,7 @@
 
 #include <apt-pkg/strutl.h>
 
+#include <limits>
 #include <string>
 #include "http_header.h"
 
@@ -175,4 +176,94 @@ string HttpLinkHeader::param(string Key) {
 
 size_t HttpLinkHeader::paramsCount() {
     return Params.size();
+}
+
+HttpLink6249Header::HttpLink6249Header() {
+}
+
+HttpLink6249Header::HttpLink6249Header(HttpLinkHeader NewLink) {
+    if (!NewLink.has("rel") || NewLink.param("rel") != "duplicate")
+	return;
+
+    Link = NewLink;
+}
+
+bool HttpLink6249Header::empty() {
+    return (Link.empty() || Link.getURI().empty());
+}
+
+unsigned long HttpLink6249Header::depth() {
+    if (!Link.has("depth"))
+	return 0;
+
+    unsigned long Depth;
+    Depth = strtoul(Link.param("depth").c_str(), NULL, 10);
+
+    // invalid depth? treat is a 0
+    if (Depth >= std::numeric_limits<unsigned long>::max())
+	Depth = 0;
+
+    return Depth;
+}
+
+string HttpLink6249Header::depthPath() {
+    return pathAtDepth(Link.getURI());
+}
+
+string HttpLink6249Header::pathAtDepth(URI UriRef) {
+    unsigned long Depth = depth();
+    string RefPath = UriRef.Path;
+
+    string::const_reverse_iterator rit = RefPath.rbegin();
+    if (*rit == '/')
+	return "";
+
+    if (Depth == 0)
+	return RefPath;
+
+    unsigned long Slashes = 0;
+    string::size_type SlPos = string::npos;
+
+    // count the number of slashes in the URI ref and find the
+    // start position of the stuff that we would have to ignore
+    for (; Slashes < Depth && SlPos != 0; Slashes++) {
+	SlPos = RefPath.rfind('/', SlPos-1);
+	if (SlPos == string::npos)
+	    break;
+    }
+
+    // broken
+    if (Depth > Slashes)
+	return "";
+
+    return UriRef.Path.substr(0, SlPos+1);
+}
+
+void HttpLink6249Header::setOrigURI(URI NewOrigUri) {
+    OrigUri = NewOrigUri;
+}
+
+URI HttpLink6249Header::rewrite(URI NewlyRequestedUri) {
+    URI DupUri = Link.getURI();
+    // shorten its path to that of the correct depth
+    DupUri.Path = depthPath();
+
+    if (depth() == 0)
+	return DupUri;
+
+    // find, for the original request (on the one where we got the rel=dup)
+    // its path at the specified depth
+    string OrigBasePath = pathAtDepth(OrigUri);
+    string::size_type OBPLength = OrigBasePath.length();
+
+    // if they don't share the same base then it is an invalid operation.
+    // Return an empty URI in that case
+    if (NewlyRequestedUri.Path.compare(0, OBPLength, OrigBasePath, 0, OBPLength) != 0)
+	return URI();
+
+    // from the newly requested uri, get rid of the OrigBasePath
+    // and append it to the dup uri's base path
+    DupUri.Path.append(NewlyRequestedUri.Path.substr(OBPLength));
+
+    return DupUri;
 }

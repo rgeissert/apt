@@ -12,7 +12,9 @@
 #define APT_HTTP_H
 
 #include <apt-pkg/strutl.h>
+#include "http_header.h"
 
+#include <list>
 #include <string>
 
 using std::cout;
@@ -101,6 +103,7 @@ struct ServerState
    enum {Header, Data} State;
    bool Persistent;
    std::string Location;
+   std::list<HttpLink6249Header> RFC6249Rewriters;
    
    // This is a Persistent attribute of the server itself.
    bool Pipeline;
@@ -118,7 +121,7 @@ struct ServerState
    void Reset() {Major = 0; Minor = 0; Result = 0; Code[0] = '\0'; Size = 0;
 		 StartPos = 0; Encoding = Closes; time(&Date); HaveContent = false;
 		 State = Header; Persistent = false; ServerFd = -1;
-		 Pipeline = true;};
+		 Pipeline = true; RFC6249Rewriters.clear(); };
 
    /** \brief Result of the header acquire */
    enum RunHeadersResult {

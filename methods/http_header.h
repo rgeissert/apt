@@ -39,4 +39,20 @@ class HttpLinkHeader {
     size_t paramsCount();
 };
 
+class HttpLink6249Header {
+    HttpLinkHeader Link;
+    URI OrigUri;
+
+    public:
+    HttpLink6249Header();
+    HttpLink6249Header(HttpLinkHeader NewLink);
+
+    bool empty();
+    unsigned long depth();
+    std::string depthPath();
+    std::string pathAtDepth(URI UriRef);
+    void setOrigURI(URI NewOrigUri);
+    URI rewrite(URI RequestedUri);
+};
+
 #endif
